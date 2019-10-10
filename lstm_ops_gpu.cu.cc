@@ -26,10 +26,14 @@ limitations under the License.
 namespace tensorflow {
 namespace functor {
 
+// DOC:
+// 定义一个GPU设备
 typedef Eigen::GpuDevice GPUDevice;
 
 namespace {
 
+// DOC:
+// CUDA float转换为half数据类型
 struct FloatToHalf {
   __host__ __device__ EIGEN_STRONG_INLINE Eigen::half operator()(
       const float& x) const {
@@ -37,11 +41,15 @@ struct FloatToHalf {
   }
 };
 
+// DOC:
+// 如果数据类型不相同，则强制转换
 template <typename U, typename T>
 __host__ __device__ EIGEN_STRONG_INLINE
     typename std::enable_if<!std::is_same<T, U>::value, U>::type
     strict_cast(T t);
 
+// DOC:
+// 如果数据类型相同，则返回其值
 template <typename U, typename T>
 __host__ __device__ EIGEN_STRONG_INLINE
     typename std::enable_if<std::is_same<T, U>::value, U>::type
@@ -49,6 +57,8 @@ __host__ __device__ EIGEN_STRONG_INLINE
   return t;
 }
 
+// DOC:
+// 将输入的float转为half数据类型输出
 template <>
 __host__ __device__ EIGEN_STRONG_INLINE Eigen::half
 strict_cast<Eigen::half, float>(float t) {
@@ -57,6 +67,8 @@ strict_cast<Eigen::half, float>(float t) {
 
 }  // namespace
 
+// DOC:
+// 参数初始化
 template <typename T>
 struct TensorZero<GPUDevice, T> {
   void operator()(const GPUDevice& d, typename TTypes<T>::Flat t) {
@@ -64,6 +76,8 @@ struct TensorZero<GPUDevice, T> {
   }
 };
 
+// DOC:
+// 参数的随机初始化
 template <typename T>
 struct TensorUnalignedZero<GPUDevice, T> {
   void operator()(const GPUDevice& d, typename TTypes<T>::UnalignedFlat t) {
@@ -81,18 +95,43 @@ namespace {
 // Launch with blocks of (batch x 32)
 //
 // TODO(b/67600500): Try making 'use_peephole' a template parameter.
+// DOC:
+// 加入偏差值，并将其加入非线性关系和门中
+// x代表样本序号，y代表激活值
+// 参数：
+//      gates ---- 门值
+//      b     ---- 偏差值
+//      cs_prev ---- 前一个记忆细胞的值
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      o   ---- 输出门值
+//      h   ---- 假设值
+//      i   ---- 更新门值
+//      f   ---- 遗忘门值
+//      ci  ---- 更新记忆细胞值
+//      cs  ---- 候选记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      forget_bias ---- 遗忘门偏差值
+//      cell_clip ---- 记忆细胞偏移量
+//      batch_size ---- 批量大小
+//      cell_size ---- 记忆细胞容量
 template <typename T, bool use_peephole, GateLayout gate_layout>
 __global__ void lstm_gates(const T* gates, const T* b, const T* cs_prev,
                            const T* wci, const T* wcf, const T* wco, T* o, T* h,
                            T* ci, T* cs, T* co, T* i, T* f,
                            const float forget_bias, const float cell_clip,
                            const int batch_size, const int cell_size) {
+  // DOC:
+  // 计算批次序号和行为序号
   const int batch_id = blockIdx.x * blockDim.x + threadIdx.x;
   const int act_id = blockIdx.y * blockDim.y + threadIdx.y;
 
+  // 将遗忘值偏差量和记忆细胞之间差值强制转换为泛型
   T forget_bias_t = strict_cast<T>(forget_bias);
   T cell_clip_t = strict_cast<T>(cell_clip);
 
+  // 如果批次序号大于批量大小，或者行为id大于记忆细胞容量，则函数返回
   if (batch_id >= batch_size || act_id >= cell_size) return;
 
   // The following code assumes the input arrays are of the following
@@ -139,62 +178,90 @@ __global__ void lstm_gates(const T* gates, const T* b, const T* cs_prev,
   //
   // 'cid' is the index assigned to this thread.
   //
+  // DOC:
+  // 定义单条神经网络门值矩阵的序号，定义单条神经网络的记忆细胞序号
   const int gid = batch_id * cell_size * 4 + act_id;
   const int cid = batch_id * cell_size + act_id;
+  // 定义sigmoid函数
   Eigen::internal::scalar_logistic_op<T> sigmoid_op;
+  // 定义tanh函数
   Eigen::internal::scalar_tanh_op<T> tanh_op;
+  // 定义记忆细胞偏差量
   Eigen::scalar_clip_op<T> clip_op;
 
+  // DOC:
+  // 定义局部序号值
   T i_local;
+  // 如果使用偷窥孔连接，则计算算式如下（考虑上一阶段的cell值）
   if (use_peephole) {
     i_local =
         sigmoid_op(gates[0 * cell_size + gid] + b[0 * cell_size + act_id] +
                    cs_prev[cid] * wci[act_id]);
   } else {
+      // 如果不使用偷窥孔连接，则不考虑上一阶段的cell值，计算算式如下
     i_local =
         sigmoid_op(gates[0 * cell_size + gid] + b[0 * cell_size + act_id]);
   }
+  // 记录cid
   i[cid] = i_local;
 
+  // DOC:
+  // 定义门值的偏差量
   const int c_offset = gate_c_offset(gate_layout, cell_size);
   const int f_offset = gate_f_offset(gate_layout, cell_size);
 
+  // 计算当前记忆细胞的更新值
   const T ci_local = tanh_op(gates[c_offset + gid] + b[c_offset + act_id]);
   ci[cid] = ci_local;
 
+  // 定义遗忘门的当前值
   T f_local;
+  // 如果使用偷窥孔连接，则计算算式如下（考虑上一阶段的cell值）
   if (use_peephole) {
     f_local = sigmoid_op(gates[f_offset + gid] + b[f_offset + act_id] +
                          forget_bias_t + cs_prev[cid] * wcf[act_id]);
   } else {
+      // 如果不使用偷窥孔连接，则不考虑上一阶段的cell值，计算算式如下
     f_local = sigmoid_op(gates[f_offset + gid] + b[f_offset + act_id] +
                          forget_bias_t);
   }
+  // 记录cid
   f[cid] = f_local;
 
+  // 计算候选记忆细胞的当前值
   T cs_local = i_local * ci_local + f_local * cs_prev[cid];
   if (cell_clip > 0.0f) {
     cs_local = clip_op(cs_local, cell_clip_t);
   }
+  // 记录cid
   cs[cid] = cs_local;
 
+  // 计算输出记忆细胞的当前值
   const T co_local = tanh_op(cs_local);
+  // 记录cid
   co[cid] = co_local;
 
+  // 定义输出记忆细胞的当前值
   T o_local;
+  // 如果使用偷窥孔连接，则计算算式如下（考虑上一阶段的cell值）
   if (use_peephole) {
     o_local = sigmoid_op(gates[3 * cell_size + gid] +
                          b[3 * cell_size + act_id] + cs_local * wco[act_id]);
   } else {
+      // 如果不使用偷窥孔连接，则不考虑上一阶段的cell值，计算算式如下
     o_local =
         sigmoid_op(gates[3 * cell_size + gid] + b[3 * cell_size + act_id]);
   }
+  // 记录cid
   o[cid] = o_local;
 
+  // 计算假设值
   h[cid] = o_local * co_local;
 }
 
 // Concatenate 'x' and 'h' and copy their contents into 'xh'.
+// DOC:
+// 连接x和h，把它们的内容合并到xh中
 template <typename T>
 __global__ void concat_xh(T* xh, const T* x, const T* h_prev,
                           const int batch_size, const int cell_size,
@@ -207,24 +274,32 @@ __global__ void concat_xh(T* xh, const T* x, const T* h_prev,
   //  |    x     |    h     |  batch_size
   //  |          |          |
   //  +----------+----------+
-  //
+  // DOC:
+  // 计算门值序号和宽度
   const int gid = blockDim.x * blockIdx.x + threadIdx.x;
   const int width = input_size + cell_size;
 
+  // 如果们只需好大于宽度乘批量大小，则函数返回
   if (gid >= width * batch_size) return;
 
+  // 定义输出的行列容量
   const int output_row = gid / width;
   const int output_col = gid % width;
 
+  // 如果输出列数比输入列数小，则xh维度与x一致
   if (output_col < input_size) {  // x
     xh[gid] = x[output_row * input_size + output_col];
   } else {  // h
+      // 如果输出列数比输入列数大，则xh维度与h一致
     xh[gid] = h_prev[output_row * cell_size + output_col - input_size];
   }
 }
 
+// DOC:
+// LSTM细胞模块向前传播算法（使用CUDA）
 template <typename T, GateLayout gate_layout>
 void LSTMBlockCellFpropWithCUDA(
+    // 定义实现向前传播算法所需的一系列参数
     OpKernelContext* ctx, const GPUDevice& d, const float forget_bias,
     const float cell_clip, bool use_peephole, typename TTypes<T>::ConstMatrix x,
     typename TTypes<T>::ConstMatrix cs_prev,
@@ -237,6 +312,7 @@ void LSTMBlockCellFpropWithCUDA(
     typename TTypes<T>::Matrix co, typename TTypes<T>::Matrix gates,
     typename TTypes<T>::Matrix h, int batch_size, int cell_size,
     int input_size) {
+    // 定义GPU流
   const auto& cu_stream = GetGpuStream(ctx);
 
   // Concatenate xh = [x, h].
@@ -244,9 +320,13 @@ void LSTMBlockCellFpropWithCUDA(
   // Each block is assigned 128 threads. Good values are in [128, 1024] and are
   // divisible by 32 (the size of a warp). The number of blocks is such that
   // there are enough to process all the data.
+  // DOC:
+  // 定义模块维度
   const int block_dim = 128;
+  // 定义网格维度
   const int grid_dim =
       Eigen::divup(batch_size * (cell_size + input_size), block_dim);
+  // 确定GPU内核成功启动
   TF_CHECK_OK(GpuLaunchKernel(concat_xh<T>, grid_dim, block_dim, 0, cu_stream,
                               xh.data(), x.data(), h_prev.data(), batch_size,
                               cell_size, input_size));
@@ -262,11 +342,14 @@ void LSTMBlockCellFpropWithCUDA(
   // Use 2D blocks. The number of threads per block is equal to x * y, where x =
   // min(batch_size, 8) and y = 32. See above for guidance on number of
   // threads.
+  // DOC:
+  // 定义二维模块和网格
   dim3 block_dim_2d(std::min(batch_size, 8), 32);
   dim3 grid_dim_2d(Eigen::divup(batch_size, static_cast<int>(block_dim_2d.x)),
                    Eigen::divup(cell_size, static_cast<int>(block_dim_2d.y)));
-
+  // 如果使用偷窥孔连接
   if (use_peephole) {
+      // 确定GPU内核成功启动
     TF_CHECK_OK(GpuLaunchKernel(
         lstm_gates<T, true, gate_layout>, grid_dim_2d, block_dim_2d, 0,
         cu_stream, gates.data(), b.data(), cs_prev.data(), wci.data(),
@@ -274,6 +357,7 @@ void LSTMBlockCellFpropWithCUDA(
         co.data(), i.data(), f.data(), forget_bias, cell_clip, batch_size,
         cell_size));
   } else {
+      // 确定GPU内核成功启动
     TF_CHECK_OK(GpuLaunchKernel(
         lstm_gates<T, false, gate_layout>, grid_dim_2d, block_dim_2d, 0,
         cu_stream, gates.data(), b.data(), cs_prev.data(), wci.data(),
@@ -283,8 +367,11 @@ void LSTMBlockCellFpropWithCUDA(
   }
 }
 
+// DOC:
+// LSTM反向传播算法
 template <typename T, GateLayout gate_layout>
 __global__ void lstm_gates_bprop(
+    // 定义反向传播算法所需要的一系列参数
     const T* cs_prev,  // [batch_size, cell_size]
     const T* h_prev,   // [batch_size, cell_size]
     const T* w,        // [input_size + cell_size, 4 * cell_size]
@@ -300,6 +387,7 @@ __global__ void lstm_gates_bprop(
     const T* co,       // [batch_size, cell_size]
     const T* cs_grad,  // [batch_size, cell_size]
     const T* h_grad,   // [batch_size, cell_size]
+    // 偏导值
     T* do_,            // [batch_size, cell_size]
     T* dcs,            // [batch_size, cell_size]
     T* dci,            // [batch_size, cell_size]
@@ -308,16 +396,23 @@ __global__ void lstm_gates_bprop(
     T* dgates,         // [input_size + cell_size, 4 * cell_size]
     T* cs_prev_grad,   // [batch_size, cell_size]
     const int batch_size, const int cell_size, const bool use_peephole) {
+  // DOC:
+  // 定义批次序号和行为序号
   const int batch_id = blockIdx.x * blockDim.x + threadIdx.x;
   const int act_id = blockIdx.y * blockDim.y + threadIdx.y;
 
+  // 如果批次序号大于等于批量大小，或者行为序号大于等于记忆细胞容量，则函数返回
   if (batch_id >= batch_size || act_id >= cell_size) return;
 
+  // 计算gid和cid
   const int gid = batch_id * cell_size * 4 + act_id;
   const int cid = batch_id * cell_size + act_id;
 
+  // 初始化一个全为1的矩阵
   const T one = static_cast<T>(1.0f);
 
+  // DOC:
+  // 反向传播算法实现
   // do[t] = sigm'(o[t]) .* dh[t] .* co[t]
   const T o_local = o[cid];
   const T h_grad_local = h_grad[cid];
@@ -360,8 +455,11 @@ __global__ void lstm_gates_bprop(
   }
 }
 
+// DOC:
+// LSTM细胞模块向后传播算法（使用CUDA）
 template <typename T, GateLayout gate_layout>
 void LSTMBlockCellBpropWithCUDA(
+    // 定义所需的一系列变量
     OpKernelContext* ctx, const GPUDevice& d, typename TTypes<T>::ConstMatrix x,
     typename TTypes<T>::ConstMatrix cs_prev,
     typename TTypes<T>::ConstMatrix h_prev, typename TTypes<T>::ConstMatrix w,
@@ -406,10 +504,14 @@ void LSTMBlockCellBpropWithCUDA(
 
 }  // namespace
 
+// DOC:
+// 声明使用GPU时LSTM向前向后传播算法
 #define DECLARE_GPU_FBPROP(T, GATE_LAYOUT)                                    \
+  // 定义LSTM向前传播算法
   template <>                                                                 \
   void LSTMBlockCellFprop<GPUDevice, T, true /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                 \
+      // 定义所需的一系列变量
       OpKernelContext* ctx, const GPUDevice& d, const float forget_bias,      \
       const float cell_clip, bool use_peephole,                               \
       typename TTypes<T>::ConstMatrix x,                                      \
@@ -427,6 +529,7 @@ void LSTMBlockCellBpropWithCUDA(
         wci, wcf, wco, b, xh, i, cs, f, o, ci, co, gates, h, batch_size_,     \
         cell_size_, input_size_);                                             \
   }                                                                           \
+  // 定义LSTM反向传播算法
   template <>                                                                 \
   void LSTMBlockCellBprop<GPUDevice, T, true /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                 \
@@ -460,6 +563,8 @@ void LSTMBlockCellBpropWithCUDA(
   template struct BlockLSTMBprop<GPUDevice, T, true /* USE_CUBLAS */,         \
                                  GATE_LAYOUT>;
 
+// DOC:
+// 声明使用GPU时表示特性的参数
 #define DECLARE_GPU_SPECS(T)                           \
   template struct TensorZero<GPUDevice, T>;            \
   template struct TensorUnalignedZero<GPUDevice, T>;   \
@@ -468,8 +573,7 @@ void LSTMBlockCellBpropWithCUDA(
   template struct TensorCopyToUnaligned<GPUDevice, T>; \
   template struct TensorAdd<GPUDevice, T>;             \
                                                        \
-  DECLARE_GPU_FBPROP(T, ICFO);                         \
-  DECLARE_GPU_FBPROP(T, IFCO);
+  DECLARE_GPU_FBPROP(T, ICFO);
 
 DECLARE_GPU_SPECS(Eigen::half);
 DECLARE_GPU_SPECS(float);
