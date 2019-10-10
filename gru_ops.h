@@ -34,16 +34,20 @@ struct GRUCell {
         input_size_(input_size),
         cell_size_(cell_size) {}
 
+  // 输入值在数据中的偏移量
   inline Eigen::array<Eigen::DenseIndex, 2> x_offsets() const { return {0, 0}; }
 
+  // 输入值的增量(用于定位下一个输入值)
   inline Eigen::array<Eigen::DenseIndex, 2> x_extends() const {
     return {batch_size_, input_size_};
   }
 
+  // 估计值在数据中的偏移量
   inline Eigen::array<Eigen::DenseIndex, 2> h_offsets() const {
     return {0, input_size_};
   }
 
+  // 估计值的增量(用于定位下一个估计值)
   inline Eigen::array<Eigen::DenseIndex, 2> h_extends() const {
     return {batch_size_, cell_size_};
   }
@@ -56,6 +60,7 @@ struct GRUCell {
     return {0, cell_size_};
   }
 
+  // 细胞增量(用来定位下一个细胞)
   inline Eigen::array<Eigen::DenseIndex, 2> cell_extents() const {
     return {batch_size_, cell_size_};
   }
@@ -76,9 +81,14 @@ struct GRUBlockCellFprop : public GRUCell {
       : GRUCell(batch_size, input_size, cell_size) {}
 
   // 进入此细胞并执行操作。
+  //
   // 参数：
+  //       x ---- 输入值
+  //       h_prev ---- 上一个细胞的估计值
   //       w_c ---- 权重矩阵
   //       b_c ---- 损失矩阵
+  //       h ---- 估计值
+  //       x_h_prev ---- 上一个细胞中，输入值、估计值的组合
   void operator()(
       OpKernelContext* ctx, const Device& d, typename TTypes<T>::ConstMatrix x,
       typename TTypes<T>::ConstMatrix h_prev,
@@ -140,9 +150,14 @@ struct GRUBlockCellBprop : public GRUCell {
       : GRUCell(batch_size, input_size, cell_size) {}
 
   // 进入此细胞并执行操作。
+  //
   // 参数：
+  //       x ---- 输入值
+  //       h_prev ---- 上一个细胞的估计值
   //       w_c ---- 权重矩阵
   //       b_c ---- 损失矩阵
+  //       h ---- 估计值
+  //       x_h_prev ---- 上一个细胞中，输入值、估计值的组合
   void operator()(
       OpKernelContext* ctx, const Device& d, typename TTypes<T>::ConstMatrix x,
       typename TTypes<T>::ConstMatrix h_prev,
