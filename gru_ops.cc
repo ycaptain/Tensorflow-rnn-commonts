@@ -30,6 +30,7 @@ class GRUCellBlockOp : public OpKernel {
   explicit GRUCellBlockOp(OpKernelConstruction* ctx) : OpKernel(ctx) {}
   // TODO(gitegaurav) Replace the input checks with some smarter function.
   void Compute(OpKernelContext* ctx) override {
+	// 张量(tensor)输入
     // Grab the input tensors.
     const Tensor* x_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("x", &x_tensor));
@@ -53,6 +54,7 @@ class GRUCellBlockOp : public OpKernel {
     const int64 input_size = x_tensor->dim_size(1);
     const int64 cell_size = h_prev_tensor->dim_size(1);
 
+	// 输入状况的正常性检测
     // Sanity checks for input shapes.
 
     // Shape of 'h' must be [batch_size, cell_size]
@@ -105,6 +107,7 @@ class GRUCellBlockOp : public OpKernel {
                 errors::InvalidArgument("Rank of b_c must be 1",
                                         b_c_tensor->dims(), " vs. 1"));
 
+	// 创建输出张量
     // Create output tensors.
     Tensor* r_tensor = nullptr;
     OP_REQUIRES_OK(
@@ -126,6 +129,7 @@ class GRUCellBlockOp : public OpKernel {
                             {"h_prev"}, "h",
                             TensorShape({batch_size, cell_size}), &h_tensor));
 
+	// 分配临时张量
     // Allocate temp tensors.
     Tensor x_h_prev_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(
@@ -158,6 +162,7 @@ class GRUCellBlockOp : public OpKernel {
   }
 };
 
+// 为CPU注册块GRU细胞内核
 // Register the Block GRU cell kernel for CPU.
 #define REGISTER_KERNEL(T)                                            \
   REGISTER_KERNEL_BUILDER(                                            \
@@ -173,6 +178,7 @@ class GRUBlockCellGradOp : public OpKernel {
   explicit GRUBlockCellGradOp(OpKernelConstruction* ctx) : OpKernel(ctx) {}
 
   void Compute(OpKernelContext* ctx) override {
+	// 张量输入
     // Grab the input tensors.
     const Tensor* x_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("x", &x_tensor));
@@ -208,6 +214,7 @@ class GRUBlockCellGradOp : public OpKernel {
     const int64 input_size = x_tensor->dim_size(1);
     const int64 cell_size = h_prev_tensor->dim_size(1);
 
+	// 输入状况的正常性检测
     // Sanity checks for input shapes.
 
     // Shape of 'h_prev' must be [batch_size, cell_size]
@@ -302,6 +309,7 @@ class GRUBlockCellGradOp : public OpKernel {
                     "d_h.dims(1) != cell_size: ", d_h_tensor->dim_size(1),
                     " vs. ", cell_size));
 
+	// 创建输出张量
     // Create output tensors.
     Tensor* d_x_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->forward_input_or_allocate_output(
@@ -325,6 +333,7 @@ class GRUBlockCellGradOp : public OpKernel {
                                   TensorShape({batch_size, 2 * cell_size}),
                                   &d_r_bar_u_bar_tensor));
 
+	// 分配临时张量
     // Allocate temp tensors.
     Tensor d_r_bar_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
@@ -370,6 +379,7 @@ class GRUBlockCellGradOp : public OpKernel {
   }
 };
 
+// 为CPU注册渐变内核
 // Register the gradient kernel for CPU.
 #define REGISTER_KERNEL(T)                                                \
   REGISTER_KERNEL_BUILDER(                                                \
@@ -379,6 +389,7 @@ class GRUBlockCellGradOp : public OpKernel {
 REGISTER_KERNEL(float);
 #undef REGISTER_KERNEL
 
+// 是否支持CUDA以使用GPU加速
 // GPU support.
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 #define EIGEN_USE_GPU

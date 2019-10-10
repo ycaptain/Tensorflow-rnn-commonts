@@ -27,6 +27,7 @@ class OpKernelContext;
 
 namespace functor {
 
+// GRU细胞
 struct GRUCell {
   GRUCell(const int batch_size, const int input_size, const int cell_size)
       : batch_size_(batch_size),
@@ -92,11 +93,13 @@ struct GRUBlockCellFprop : public GRUCell {
         const_x_h_prev, w_ru, typename gemm_compute_type<T>::type(0.f),
         r_u_bar);
 
+	// 创建损失矩阵
     // Creating a bias matrix for adding by broadcasting 'b_ru'
     Eigen::array<Eigen::DenseIndex, 2> broadcast_shape({batch_size_, 1});
     Eigen::array<Eigen::DenseIndex, 2> b_ru_shape({1, b_ru.dimensions()[0]});
     r_u_bar.device(d) += b_ru.reshape(b_ru_shape).broadcast(broadcast_shape);
 
+	// 应用sigmoid激活函数将r_u_bar切分成r和u两个矩阵
     // Slice r_u_bar into r, u and apply the sigmoid.
     r.device(d) = (r_u_bar.slice(ru_r_offset(), cell_extents())).sigmoid();
     u.device(d) = (r_u_bar.slice(ru_u_offset(), cell_extents())).sigmoid();
@@ -105,6 +108,7 @@ struct GRUBlockCellFprop : public GRUCell {
     x_h_prevr.slice(x_offsets(), x_extends()).device(d) = x;
     x_h_prevr.slice(h_offsets(), h_extends()).device(d) = h_prev * r;
 
+	// tanh激活
     // c = tanh(x_h_prevr*w_c+b_c), Note b_c is broadcasted before adding.
     typename TTypes<T>::ConstMatrix const_x_h_prevr(x_h_prevr.data(),
                                                     x_h_prevr.dimensions());
