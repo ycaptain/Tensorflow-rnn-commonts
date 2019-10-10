@@ -364,6 +364,7 @@ class GRUBlockCellGradOp : public OpKernel {
 
     const Device& device = ctx->eigen_device<Device>();
 
+	// 反向传播
     functor::GRUBlockCellBprop<Device, T, USE_CUBLAS>(batch_size, input_size,
                                                       cell_size)(
         ctx, device, x_tensor->matrix<T>(), h_prev_tensor->matrix<T>(),
@@ -394,6 +395,7 @@ REGISTER_KERNEL(float);
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 #define EIGEN_USE_GPU
 
+// GPU加速的正向传播
 // Forward declare the GPU Fprop functor.
 namespace functor {
 #define DECLARE_GPU_SPEC(T)                                                   \
@@ -426,6 +428,7 @@ REGISTER_GPU_KERNEL(float);
 
 // Forward declare the GPU Bprop functor.
 namespace functor {
+// GPU加速的反向传播
 #define DECLARE_GPU_SPEC(T)                                                    \
   template <>                                                                  \
   void GRUBlockCellBprop<GPUDevice, T, true>::operator()(                      \

@@ -61,17 +61,24 @@ struct GRUCell {
   }
 
  protected:
+  // batch中的元素数目
   const int batch_size_;
+  // 输入数目
   const int input_size_;
   const int cell_size_;
 };
 
+// 用于前向传播的GRU细胞
 template <typename Device, typename T, bool USE_CUBLAS>
 struct GRUBlockCellFprop : public GRUCell {
   GRUBlockCellFprop(const int batch_size, const int input_size,
                     const int cell_size)
       : GRUCell(batch_size, input_size, cell_size) {}
 
+  // 进入此细胞并执行操作。
+  // 参数：
+  //       w_c ---- 权重矩阵
+  //       b_c ---- 损失矩阵
   void operator()(
       OpKernelContext* ctx, const Device& d, typename TTypes<T>::ConstMatrix x,
       typename TTypes<T>::ConstMatrix h_prev,
@@ -125,12 +132,17 @@ struct GRUBlockCellFprop : public GRUCell {
   }
 };
 
+// 用于后向传播的GRU细胞
 template <typename Device, typename T, bool USE_CUBLAS>
 struct GRUBlockCellBprop : public GRUCell {
   GRUBlockCellBprop(const int batch_size, const int input_size,
                     const int cell_size)
       : GRUCell(batch_size, input_size, cell_size) {}
 
+  // 进入此细胞并执行操作。
+  // 参数：
+  //       w_c ---- 权重矩阵
+  //       b_c ---- 损失矩阵
   void operator()(
       OpKernelContext* ctx, const Device& d, typename TTypes<T>::ConstMatrix x,
       typename TTypes<T>::ConstMatrix h_prev,
