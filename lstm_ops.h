@@ -62,7 +62,7 @@ struct TensorZero {
 };
 
 // DOC:
-// 随机初始化张量中参数
+// 初始化未对齐的张量中参数
 template <typename Device, typename T>
 struct TensorUnalignedZero {
   void operator()(const Device& d, typename TTypes<T>::UnalignedFlat t) {
@@ -81,7 +81,7 @@ struct TensorCopy {
 };
 
 // DOC:
-// 随机复制张量中值
+// 复制维度未对齐的张量中值
 template <typename Device, typename T>
 struct TensorCopyUnaligned {
   void operator()(const Device& d, typename TTypes<T>::UnalignedConstFlat src,
@@ -91,7 +91,7 @@ struct TensorCopyUnaligned {
 };
 
 // DOC:
-// 复制无序的张量并回到原始序列状态
+// 复制维度未对齐的的张量并回到原始状态
 template <typename Device, typename T>
 struct TensorCopyToUnaligned {
   void operator()(const Device& d, typename TTypes<T>::ConstFlat src,
@@ -188,10 +188,35 @@ struct LSTMBlockCell {
   const int cell_size_;
 };
 
-// DOC:
-// GPU处理器的实现
 // See lstm_ops.cc for CPUDevice implementation and lstm_ops_gpu.cu.cc for
 // GPUDevice implementation.
+// DOC:
+// GPU处理器的实现
+// 定义LSTM向前传播算法块
+//
+// 成员变量：
+//      ctx ---- 输入内容
+//      d ---- CPU处理器
+//      forget_bias ---- 遗忘门偏差值
+//      cell_clip   ---- 记忆细胞偏移量
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      xh  ---- x和h的组合值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      gates   ---- 门值
+//      h   ---- 假设值
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 struct LSTMBlockCellFprop : public LSTMBlockCell {
   LSTMBlockCellFprop(const int batch_size, const int input_size,
@@ -217,6 +242,41 @@ struct LSTMBlockCellFprop : public LSTMBlockCell {
 
 // See lstm_ops.cc for CPUDevice implementation and lstm_ops_gpu.cu.cc for
 // GPUDevice implementation.
+// DOC：
+// GPU处理器的实现
+// 定义LSTM反向传播算法块
+//
+// 成员变量：
+//      cell ---- 记忆细胞值
+//      ctx ---- 输入内容
+//      d --- CPU处理器
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      cs_grad ---- 记忆细胞值的梯度
+//      h_grad  ----  假设值的梯度
+//      do_ ---- 输出值的偏导值
+//      dcs ---- 候选记忆细胞值的偏导值
+//      dci ---- 更新记忆细胞偏导值
+//      df ---- 遗忘门偏导值
+//      di ----  更新门偏导值
+//      dgates  ----  门值偏导值
+//      cs_prev_grad    ---- 前一个记忆细胞值的梯度
+//      wci_grad    ---- 更新门权重矩阵的梯度
+//      wcf_grad    ---- 遗忘门权重矩阵的梯度
+//      wco_grad    ---- 输出门权重矩阵的梯度
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 struct LSTMBlockCellBprop : public LSTMBlockCell {
   LSTMBlockCellBprop(const int batch_size, const int input_size,
@@ -244,6 +304,9 @@ struct LSTMBlockCellBprop : public LSTMBlockCell {
 
 // DOC:
 // LSTM反向传播算法模块
+//
+// 成员变量：
+
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 struct BlockLSTMBprop : public LSTMBlockCell {
   BlockLSTMBprop(const int batch_size, const int input_size,

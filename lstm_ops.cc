@@ -36,11 +36,41 @@ limitations under the License.
 
 namespace tensorflow {
 
-typedef Eigen::ThreadPoolDevice CPUDevice;
+// DOC:
+// 定义一个CPU处理器
+typedef Eigen::ThreadPoolDevice CPUDevice
+// 定义一个GPU处理器
 typedef Eigen::GpuDevice GPUDevice;
 
 namespace functor {
 
+// DOC:
+// LSTM记忆细胞向前传播算法块，使用特征向量
+//
+// 参数：
+//      cell ---- 记忆细胞值
+//      ctx ---- 输入内容
+//      d ---- CPU处理器
+//      forget_bias ---- 遗忘门偏差值
+//      cell_clip   ---- 记忆细胞偏移量
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      xh  ---- x和h的组合值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      gates   ---- 门值
+//      h   ---- 假设值
 template <typename T, GateLayout gate_layout>
 void LSTMBlockCellFpropWithEigen(
     const LSTMBlockCell& cell, OpKernelContext* ctx, const CPUDevice& d,
@@ -54,6 +84,7 @@ void LSTMBlockCellFpropWithEigen(
     typename TTypes<T>::Matrix o, typename TTypes<T>::Matrix ci,
     typename TTypes<T>::Matrix co, typename TTypes<T>::Matrix gates,
     typename TTypes<T>::Matrix h) {
+  // 将x和h组合为xh
   // Concat xh = [x, h].
   xh.slice(cell.xh_x_offsets(), cell.xh_x_extents()).device(d) = x;
   xh.slice(cell.xh_h_offsets(), cell.xh_h_extents()).device(d) = h_prev;
@@ -70,23 +101,29 @@ void LSTMBlockCellFpropWithEigen(
   Eigen::array<Eigen::DenseIndex, 2> p_shape({1, cell.cell_size()});
   Eigen::array<Eigen::DenseIndex, 2> p_broadcast_shape({cell.batch_size(), 1});
 
+  // 输入门
   // Input gate.
+  // 如果使用偷窥孔连接，则计算算式如下（考虑上一阶段的cell值）
   if (use_peephole) {
     auto i_peep = cs_prev * wci.reshape(p_shape).broadcast(p_broadcast_shape);
     i.device(d) =
         (gates.slice(cell.gates_i_offsets(), cell.cell_extents()) + i_peep)
             .sigmoid();
   } else {
+      // 如果不使用偷窥孔连接，则不考虑上一阶段的cell值，计算算式如下
     i.device(d) =
         gates.slice(cell.gates_i_offsets(), cell.cell_extents()).sigmoid();
   }
 
+  // 输入记忆细胞
   // Cell input.
   ci.device(d) =
       gates.slice(cell.gates_c_offsets(gate_layout), cell.cell_extents())
           .tanh();
 
+  // 输入遗忘门
   // Forget gate (w/ bias).
+  // 如果使用偷窥孔连接，则计算算式如下（考虑上一阶段的cell值）
   if (use_peephole) {
     auto f_peep = cs_prev * wcf.reshape(p_shape).broadcast(p_broadcast_shape);
     f.device(d) =
@@ -94,6 +131,7 @@ void LSTMBlockCellFpropWithEigen(
          f.constant(T(forget_bias)) + f_peep)
             .sigmoid();
   } else {
+      // 如果不使用偷窥孔连接，则不考虑上一阶段的cell值，计算算式如下
     f.device(d) =
         (gates.slice(cell.gates_f_offsets(gate_layout), cell.cell_extents()) +
          f.constant(T(forget_bias)))
@@ -126,6 +164,40 @@ void LSTMBlockCellFpropWithEigen(
   h.device(d) = o * co;
 }
 
+// DOC:
+// LSTM记忆细胞反向传播算法块，使用特征向量
+//
+// 参数：
+//      cell ---- 记忆细胞值
+//      ctx ---- 输入内容
+//      d --- CPU处理器
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      cs_grad ---- 记忆细胞值的梯度
+//      h_grad  ----  假设值的梯度
+//      do_ ---- 输出值的偏导值
+//      dcs ---- 候选记忆细胞值的偏导值
+//      dci ---- 更新记忆细胞偏导值
+//      df ---- 遗忘门偏导值
+//      di ----  更新门偏导值
+//      dgates  ----  门值偏导值
+//      cs_prev_grad    ---- 前一个记忆细胞值的梯度
+//      wci_grad    ---- 更新门权重矩阵的梯度
+//      wcf_grad    ---- 遗忘门权重矩阵的梯度
+//      wco_grad    ---- 输出门权重矩阵的梯度
 template <typename Device, typename T, GateLayout gate_layout>
 void LSTMBlockCellBpropWithEigen(
     const LSTMBlockCell& cell, OpKernelContext* ctx, const Device& d,
@@ -184,7 +256,34 @@ void LSTMBlockCellBpropWithEigen(
   }
 }
 
+// DOC:
+// 声明使用CPU时LSTM向前向后传播算法
 #define DECLARE_CPU_FBPROP(T, GATE_LAYOUT)                                     \
+// 定义LSTM向前传播算法块
+//
+// 成员变量：
+//      ctx ---- 输入内容
+//      d ---- CPU处理器
+//      forget_bias ---- 遗忘门偏差值
+//      cell_clip   ---- 记忆细胞偏移量
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      xh  ---- x和h的组合值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      gates   ---- 门值
+//      h   ---- 假设值
   template <>                                                                  \
   void LSTMBlockCellFprop<CPUDevice, T, false /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                  \
@@ -204,6 +303,39 @@ void LSTMBlockCellBpropWithEigen(
         *this, ctx, d, forget_bias, cell_clip, use_peephole, x, cs_prev,       \
         h_prev, w, wci, wcf, wco, b, xh, i, cs, f, o, ci, co, gates, h);       \
   }                                                                            \
+// 定义LSTM反向传播算法块
+//
+// 成员变量：
+//      cell ---- 记忆细胞值
+//      ctx ---- 输入内容
+//      d --- CPU处理器
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      cs_grad ---- 记忆细胞值的梯度
+//      h_grad  ----  假设值的梯度
+//      do_ ---- 输出值的偏导值
+//      dcs ---- 候选记忆细胞值的偏导值
+//      dci ---- 更新记忆细胞偏导值
+//      df ---- 遗忘门偏导值
+//      di ----  更新门偏导值
+//      dgates  ----  门值偏导值
+//      cs_prev_grad    ---- 前一个记忆细胞值的梯度
+//      wci_grad    ---- 更新门权重矩阵的梯度
+//      wcf_grad    ---- 遗忘门权重矩阵的梯度
+//      wco_grad    ---- 输出门权重矩阵的梯度
   template <>                                                                  \
   void LSTMBlockCellBprop<CPUDevice, T, false /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                  \
@@ -235,6 +367,8 @@ void LSTMBlockCellBpropWithEigen(
   template struct LSTMBlockCellBprop<CPUDevice, T, false /* USE_CUBLAS */,     \
                                      GATE_LAYOUT>;
 
+// DOC:
+// 声明使用CPU时表示特性的参数
 #define DECLARE_CPU_SPECS(T)   \
   DECLARE_CPU_FBPROP(T, ICFO); \
   DECLARE_CPU_FBPROP(T, IFCO);
@@ -245,7 +379,10 @@ DECLARE_CPU_SPECS(float);
 #undef DECLARE_CPU_FBPROP
 
 #if GOOGLE_CUDA
+// DOC:
+// 声明使用GPU时LSTM向前向后传播算法
 #define DECLARE_GPU_FBPROP(T, GATE_LAYOUT)                                    \
+  // 定义LSTM向前传播算法块
   template <>                                                                 \
   void LSTMBlockCellFprop<GPUDevice, T, true, GATE_LAYOUT>::operator()(       \
       OpKernelContext* ctx, const GPUDevice& d, const float forget_bias,      \
@@ -260,6 +397,7 @@ DECLARE_CPU_SPECS(float);
       typename TTypes<T>::Matrix f, typename TTypes<T>::Matrix o,             \
       typename TTypes<T>::Matrix ci, typename TTypes<T>::Matrix co,           \
       typename TTypes<T>::Matrix gates, typename TTypes<T>::Matrix h);        \
+  // 定义LSTM反向传播算法块
   template <>                                                                 \
   void LSTMBlockCellBprop<GPUDevice, T, true, GATE_LAYOUT>::operator()(       \
       OpKernelContext* ctx, const GPUDevice& d, bool use_peephole,            \
@@ -285,6 +423,8 @@ DECLARE_CPU_SPECS(float);
       GPUDevice, T, true /* USE_CUBLAS */, GATE_LAYOUT>;                      \
   extern template struct LSTMBlockCellFprop<GPUDevice, T, true, GATE_LAYOUT>;
 
+// DOC:
+// 声明使用GPU时表示特性的参数
 #define DECLARE_GPU_SPECS(T) DECLARE_GPU_FBPROP(T, ICFO);
 
 DECLARE_GPU_SPECS(float);
@@ -294,15 +434,21 @@ DECLARE_GPU_SPECS(Eigen::half);
 #endif  // GOOGLE_CUDA
 }  // namespace functor
 
+// DOC:
+// 定义一个LSTM记忆细胞模块操作类，继承了内核操作类
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 class LSTMBlockCellOp : public OpKernel {
  public:
   explicit LSTMBlockCellOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
+    // OP_REQUIRES_OK():
+    // 测试一个函数返回的状态对象是否是一个错误，如果是则直接跳出函数, 终止函数执行
+    // 获取欲保存的遗忘门偏差值，记忆细胞偏移量，是否使用偷窥孔连接布尔值
     OP_REQUIRES_OK(ctx, ctx->GetAttr("forget_bias", &forget_bias_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("cell_clip", &cell_clip_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
   }
 
+  // 重写内核操作类的计算函数
   void Compute(OpKernelContext* ctx) override {
     const Tensor* x_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("x", &x_tensor));
@@ -332,6 +478,7 @@ class LSTMBlockCellOp : public OpKernel {
     const int64 input_size = x_tensor->dim_size(1);
     const int64 cell_size = cs_prev_tensor->dim_size(1);
 
+    // 确定输入维度大小合理，否则则输出错误信息
     // Sanity checks for our input shapes.
     OP_REQUIRES(ctx, cs_prev_tensor->dim_size(0) == batch_size,
                 errors::InvalidArgument("cs_prev.dims(0) != batch_size: ",
@@ -365,6 +512,7 @@ class LSTMBlockCellOp : public OpKernel {
                     "b.dim_size(0) != cell_size * 4: ", b_tensor->dim_size(0),
                     " vs. ", cell_size * 4));
 
+    // 分配各个输出张量
     // Allocate our output tensors.
     Tensor* i_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->forward_input_or_allocate_output(
@@ -401,6 +549,7 @@ class LSTMBlockCellOp : public OpKernel {
         ctx, ctx->allocate_output("h", TensorShape({batch_size, cell_size}),
                                   &h_tensor));
 
+    // 分配各个临时张量
     // Allocate our temp tensors.
     Tensor xh_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(
@@ -429,11 +578,14 @@ class LSTMBlockCellOp : public OpKernel {
   }
 
  private:
+    // 定义私有成员变量，遗忘门偏差值，记忆细胞偏移量，是否使用偷窥孔连接
   float forget_bias_;
   float cell_clip_;
   bool use_peephole_;
 };
 
+// DOC:
+// 定义注册器内核
 #define REGISTER_KERNEL(T)                                             \
   REGISTER_KERNEL_BUILDER(                                             \
       Name("LSTMBlockCell").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
@@ -444,6 +596,7 @@ REGISTER_KERNEL(float);
 #undef REGISTER_KERNEL
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+// 定义注册器GPU内核
 #define REGISTER_GPU_KERNEL(T)                                         \
   REGISTER_KERNEL_BUILDER(                                             \
       Name("LSTMBlockCell").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
@@ -454,13 +607,17 @@ REGISTER_GPU_KERNEL(float);
 #undef REGISTER_GPU_KERNEL
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
+// DOC:
+// 定义一个LSTM记忆细胞模块梯度操作类，继承了内核操作类
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 class LSTMBlockCellGradOp : public OpKernel {
  public:
   explicit LSTMBlockCellGradOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
+      // 获取欲保存的是否使用偷窥孔连接布尔值
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
   }
 
+    // 重写内核操作类的计算函数
   void Compute(OpKernelContext* ctx) override {
     const Tensor* x_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("x", &x_tensor));
@@ -514,6 +671,7 @@ class LSTMBlockCellGradOp : public OpKernel {
     const int64 input_size = x_tensor->dim_size(1);
     const int64 cell_size = cs_prev_tensor->dim_size(1);
 
+    // 确定输入维度大小合理，否则则输出错误信息
     // Sanity checks for our input shapes.
     OP_REQUIRES(ctx, cs_prev_tensor->dim_size(0) == batch_size,
                 errors::InvalidArgument("cs_prev.dims(0) != batch_size: ",
@@ -619,6 +777,7 @@ class LSTMBlockCellGradOp : public OpKernel {
                                         h_grad_tensor->dim_size(1), " vs. ",
                                         cell_size));
 
+    // 分配各个输出张量
     // Allocate our output tensors.
     Tensor* cs_prev_grad_tensor = nullptr;
     OP_REQUIRES_OK(
@@ -646,6 +805,7 @@ class LSTMBlockCellGradOp : public OpKernel {
         ctx, ctx->forward_input_or_allocate_output(
                  {"wco"}, "wco_grad", wco_tensor->shape(), &wco_grad_tensor));
 
+    // 分配各个临时张量
     // Allocate our temp tensors.
     Tensor do_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
@@ -695,9 +855,12 @@ class LSTMBlockCellGradOp : public OpKernel {
   }
 
  protected:
-  bool use_peephole_;
+    // 定义protected成员变量，是否使用偷窥孔连接
+    bool use_peephole_;
 };
 
+// DOC:
+// 定义注册器内核
 #define REGISTER_KERNEL(T)                                                 \
   REGISTER_KERNEL_BUILDER(                                                 \
       Name("LSTMBlockCellGrad").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
@@ -707,6 +870,7 @@ REGISTER_KERNEL(Eigen::half);
 #undef REGISTER_KERNEL
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+// 定义注册器GPU内核
 #define REGISTER_GPU_KERNEL(T)                                             \
   REGISTER_KERNEL_BUILDER(                                                 \
       Name("LSTMBlockCellGrad").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
@@ -726,6 +890,10 @@ namespace {
 // cases where copying is needed, the outputs have to be recopied back.
 // At the end of each time step you should call FinishTimeStep which does this,
 // and also allows for reuse of temporary tensors.
+//
+// DOC:
+// 切片辅助类
+// 这个辅助类可以用来访问一个三维张量的时间片，解决张量维度不符合难以复制的问题
 template <typename Device, typename T>
 class SliceHelper {
  public:
@@ -739,6 +907,7 @@ class SliceHelper {
     }
   }
 
+  // 经过输入张量的切片，可以复制不对齐的各个切片
   // Slice through an input tensor. This may copy unaligned slices, but no
   // copying back will be done at the end.
   const Tensor InputSlice(const Tensor& t, int pos, const string& name) {
@@ -750,6 +919,7 @@ class SliceHelper {
     }
   }
 
+  // 经过输入张量的切片，可以复制不对齐的各个切片
   // Slice through an output tensor. This may copy unaligned slices, and
   // schedule copying back on destruction.
   Tensor OutputSlice(Tensor* t, int pos, const string& name) {
@@ -763,15 +933,18 @@ class SliceHelper {
     }
   }
 
+  // 旨在重用临时张量
   void FinishTimeStep() {
     for (const auto& p : copy_out_) {
       const Tensor& aligned = p.second;
       Tensor original = p.first;
+      // 从不对齐张量的复制回到原始状态
       // Copy from aligned back to original.
       functor::TensorCopyToUnaligned<Device, T>()(device_, aligned.flat<T>(),
                                                   original.unaligned_flat<T>());
     }
     copy_out_.clear();
+    // 标记所有入口为未被占用
     // Mark all entries as not in use.
     for (auto& entry : pool_) {
       entry.second.second = false;
@@ -825,6 +998,8 @@ class SliceHelper {
 
 }  // namespace
 
+// DOC:
+// LSTM块操作类，继承了内核操作类
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 class BlockLSTMOp : public OpKernel {
  public:
@@ -839,6 +1014,7 @@ class BlockLSTMOp : public OpKernel {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
   }
 
+  // 重写内核操作类的计算函数
   void Compute(OpKernelContext* ctx) override {
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
@@ -860,11 +1036,13 @@ class BlockLSTMOp : public OpKernel {
                                         batch_size));
     const int64 cell_size = cs_prev_tensor->dim_size(1);
 
+    // 如果批次大小和输入大小都是奇数，则输出warning
     if (batch_size * input_size % 2 == 1) {
       LOG(WARNING) << "BlockLSTMOp is inefficient when both batch_size and "
                    << "input_size are odd. You are using: batch_size="
                    << batch_size << ", input_size=" << input_size;
     }
+    // 如果批次大小和记忆细胞容量都是奇数，则输出warning
     if (batch_size * cell_size % 2 == 1) {
       LOG(WARNING) << "BlockLSTMOp is inefficient when both batch_size and "
                    << "cell_size are odd. You are using: batch_size="
@@ -1017,6 +1195,8 @@ class BlockLSTMOp : public OpKernel {
   bool use_peephole_;
 };
 
+// DOC:
+// 定义注册器内核
 #define REGISTER_KERNEL(T)                                           \
   REGISTER_KERNEL_BUILDER(                                           \
       Name("BlockLSTM").Device(DEVICE_CPU).TypeConstraint<T>("T"),   \
@@ -1031,6 +1211,8 @@ REGISTER_KERNEL(float);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 namespace functor {
+// DOC:
+// 声明使用GPU时表示特性的参数
 #define DECLARE_GPU_SPECS(T)                                             \
   template <>                                                            \
   void TensorZero<GPUDevice, T>::operator()(const GPUDevice& d,          \
@@ -1049,6 +1231,8 @@ DECLARE_GPU_SPECS(float);
 #undef DECLARE_GPU_SPECS
 }  // end namespace functor
 
+// DOC:
+// 定义GPU注册器内核
 #define REGISTER_GPU_KERNEL(T)                                    \
   REGISTER_KERNEL_BUILDER(Name("BlockLSTM")                       \
                               .Device(DEVICE_GPU)                 \
@@ -1066,13 +1250,15 @@ REGISTER_GPU_KERNEL(float);
 #undef REGISTER_GPU_KERNEL
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
+// DOC:
+// LSTM梯度操作类
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 class BlockLSTMGradOp : public OpKernel {
  public:
   explicit BlockLSTMGradOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
   }
-
+  // 重写内核操作类的计算函数
   void Compute(OpKernelContext* ctx) override {
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
@@ -1250,6 +1436,7 @@ class BlockLSTMGradOp : public OpKernel {
       const Tensor& ci_tensor = slicer.InputSlice(*ci_out, t, "ci_out");
       const Tensor& co_tensor = slicer.InputSlice(*co_out, t, "co_out");
 
+      // 抓取上一个候选记忆细胞值的梯度
       // Grab previous CS grad.
       const Tensor& const_cs_prev_grad_tensor = *cs_prev_grad_tensor;
       const Tensor const_cs_grad_slice =
@@ -1258,6 +1445,7 @@ class BlockLSTMGradOp : public OpKernel {
           device, const_cs_prev_grad_tensor.flat<T>(),
           const_cs_grad_slice.flat<T>(), cs_grad_tensor.flat<T>());
 
+      // 结合之前的假设值梯度和目前最新的假设值梯度
       // Combine previous h grad and h grad coming on top.
       const Tensor& const_h_prev_grad_tensor = *h_prev_grad_tensor;
       const Tensor const_h_grad_slice = slicer.InputSlice(*h_grad, t, "h_grad");
@@ -1299,6 +1487,8 @@ class BlockLSTMGradOp : public OpKernel {
   bool use_peephole_;
 };
 
+// DOC:
+// 定义注册器内核
 #define REGISTER_KERNEL(T)                                               \
   REGISTER_KERNEL_BUILDER(                                               \
       Name("BlockLSTMGrad").Device(DEVICE_CPU).TypeConstraint<T>("T"),   \
@@ -1313,6 +1503,7 @@ REGISTER_KERNEL(float);
 
 #if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 namespace functor {
+// 声明GPU反向传播算法
 #define DECLARE_GPU_BPROP(T, GATE_LAYOUT)                                     \
   template <>                                                                 \
   void BlockLSTMBprop<GPUDevice, T, true, GATE_LAYOUT>::operator()(           \
@@ -1339,6 +1530,8 @@ namespace functor {
       typename TTypes<T>::Vec b_grad);                                        \
   extern template struct BlockLSTMBprop<GPUDevice, T, true, GATE_LAYOUT>;
 
+// DOC:
+// 声明GPU特征值
 #define DECLARE_GPU_SPECS(T)                                                   \
   template <>                                                                  \
   void TensorCopy<GPUDevice, T>::operator()(const GPUDevice& d,                \
@@ -1372,6 +1565,8 @@ DECLARE_GPU_SPECS(float);
 #undef DECLARE_GPU_BPROP
 }  // end namespace functor
 
+// DOC:
+// 声明GPU内核注册器
 #define REGISTER_GPU_KERNEL(T)                                        \
   REGISTER_KERNEL_BUILDER(Name("BlockLSTMGrad")                       \
                               .Device(DEVICE_GPU)                     \

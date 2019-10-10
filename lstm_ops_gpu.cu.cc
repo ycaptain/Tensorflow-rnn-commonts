@@ -91,7 +91,7 @@ struct TensorZero<GPUDevice, T> {
 };
 
 // DOC:
-// 参数的随机初始化
+// 维度大小未对齐的参数的初始化
 template <typename T>
 struct TensorUnalignedZero<GPUDevice, T> {
   void operator()(const GPUDevice& d, typename TTypes<T>::UnalignedFlat t) {
@@ -604,7 +604,31 @@ void LSTMBlockCellBpropWithCUDA(
 // DOC:
 // 声明使用GPU时LSTM向前向后传播算法
 #define DECLARE_GPU_FBPROP(T, GATE_LAYOUT)                                    \
-  // 定义LSTM向前传播算法块
+// 定义LSTM向前传播算法块
+//
+// 成员变量：
+//      ctx ---- 输入内容
+//      d ---- CPU处理器
+//      forget_bias ---- 遗忘门偏差值
+//      cell_clip   ---- 记忆细胞偏移量
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      xh  ---- x和h的组合值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      gates   ---- 门值
+//      h   ---- 假设值
   template <>                                                                 \
   void LSTMBlockCellFprop<GPUDevice, T, true /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                 \
@@ -625,7 +649,38 @@ void LSTMBlockCellBpropWithCUDA(
         wci, wcf, wco, b, xh, i, cs, f, o, ci, co, gates, h, batch_size_,     \
         cell_size_, input_size_);                                             \
   }                                                                           \
-  // 定义LSTM反向传播算法块
+// 定义LSTM反向传播算法块
+// 成员变量：
+//      cell ---- 记忆细胞值
+//      ctx ---- 输入内容
+//      d --- CPU处理器
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      cs_grad ---- 记忆细胞值的梯度
+//      h_grad  ----  假设值的梯度
+//      do_ ---- 输出值的偏导值
+//      dcs ---- 候选记忆细胞值的偏导值
+//      dci ---- 更新记忆细胞偏导值
+//      df ---- 遗忘门偏导值
+//      di ----  更新门偏导值
+//      dgates  ----  门值偏导值
+//      cs_prev_grad    ---- 前一个记忆细胞值的梯度
+//      wci_grad    ---- 更新门权重矩阵的梯度
+//      wcf_grad    ---- 遗忘门权重矩阵的梯度
+//      wco_grad    ---- 输出门权重矩阵的梯度
   template <>                                                                 \
   void LSTMBlockCellBprop<GPUDevice, T, true /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                 \
