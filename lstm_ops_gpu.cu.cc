@@ -27,7 +27,7 @@ namespace tensorflow {
 namespace functor {
 
 // DOC:
-// 定义一个GPU设备
+// 定义一个GPU处理器
 typedef Eigen::GpuDevice GPUDevice;
 
 namespace {
@@ -43,6 +43,10 @@ struct FloatToHalf {
 
 // DOC:
 // 如果数据类型不相同，则强制转换
+//
+// 参数:
+//      U ---- 标准数据类型
+//      T ---- 待检测数据类型
 template <typename U, typename T>
 __host__ __device__ EIGEN_STRONG_INLINE
     typename std::enable_if<!std::is_same<T, U>::value, U>::type
@@ -50,6 +54,13 @@ __host__ __device__ EIGEN_STRONG_INLINE
 
 // DOC:
 // 如果数据类型相同，则返回其值
+//
+// 参数:
+//      U ---- 标准数据
+//      T ---- 待检测数据
+//
+// 返回值:
+//      t ---- 比较处理之后的数据
 template <typename U, typename T>
 __host__ __device__ EIGEN_STRONG_INLINE
     typename std::enable_if<std::is_same<T, U>::value, U>::type
@@ -59,6 +70,9 @@ __host__ __device__ EIGEN_STRONG_INLINE
 
 // DOC:
 // 将输入的float转为half数据类型输出
+//
+// 返回值:
+//      t ---- 转换为half后的值
 template <>
 __host__ __device__ EIGEN_STRONG_INLINE Eigen::half
 strict_cast<Eigen::half, float>(float t) {
@@ -68,7 +82,7 @@ strict_cast<Eigen::half, float>(float t) {
 }  // namespace
 
 // DOC:
-// 参数初始化
+// 参数初始化为0
 template <typename T>
 struct TensorZero<GPUDevice, T> {
   void operator()(const GPUDevice& d, typename TTypes<T>::Flat t) {
@@ -297,9 +311,33 @@ __global__ void concat_xh(T* xh, const T* x, const T* h_prev,
 
 // DOC:
 // LSTM细胞模块向前传播算法（使用CUDA）
+//
+// 参数：
+//      ctx ---- 输入内容
+//      d   ---- GPU处理器
+//      forget_bias ---- 遗忘门偏差值
+//      cell_clip   ---- 记忆细胞偏移量
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      xh  ---- x和h的组合值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      gates   ---- 门值
+//      h   ---- 假设值
+//      cell_size   ---- 记忆细胞容量
+//      input_size  ---- 输入大小
 template <typename T, GateLayout gate_layout>
 void LSTMBlockCellFpropWithCUDA(
-    // 定义实现向前传播算法所需的一系列参数
     OpKernelContext* ctx, const GPUDevice& d, const float forget_bias,
     const float cell_clip, bool use_peephole, typename TTypes<T>::ConstMatrix x,
     typename TTypes<T>::ConstMatrix cs_prev,
@@ -369,6 +407,33 @@ void LSTMBlockCellFpropWithCUDA(
 
 // DOC:
 // LSTM反向传播算法
+//
+// 参数：
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      cs_grad ---- 记忆细胞值的梯度
+//      h_grad  ----  假设值的梯度
+//      do_ ---- 输出值的偏导值
+//      dcs ---- 候选记忆细胞值的偏导值
+//      dci ---- 更新记忆细胞偏导值
+//      df ---- 遗忘门偏导值
+//      di ----  更新门偏导值
+//      dgates  ----  门值偏导值
+//      cs_prev_grad    ---- 前一个记忆细胞值的梯度
+//      batch_size  ---- 批量大小
+//      cell_size   ---- 细胞大小
+//      use_peephole    ---- 是否使用偷窥孔连接
 template <typename T, GateLayout gate_layout>
 __global__ void lstm_gates_bprop(
     // 定义反向传播算法所需要的一系列参数
@@ -457,9 +522,38 @@ __global__ void lstm_gates_bprop(
 
 // DOC:
 // LSTM细胞模块向后传播算法（使用CUDA）
+//
+// 参数：
+//      ctx ---- 输入内容
+//      d   ---- GPU处理器
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      cs_grad ---- 记忆细胞值的梯度
+//      h_grad  ----  假设值的梯度
+//      do_ ---- 输出值的偏导值
+//      dcs ---- 候选记忆细胞值的偏导值
+//      dci ---- 更新记忆细胞偏导值
+//      df ---- 遗忘门偏导值
+//      di ----  更新门偏导值
+//      dgates  ----  门值偏导值
+//      cs_prev_grad    ---- 前一个记忆细胞值的梯度
+//      batch_size  ---- 批量大小
+//      cell_size   ---- 细胞大小
+//      use_peephole    ---- 是否使用偷窥孔连接
 template <typename T, GateLayout gate_layout>
 void LSTMBlockCellBpropWithCUDA(
-    // 定义所需的一系列变量
     OpKernelContext* ctx, const GPUDevice& d, typename TTypes<T>::ConstMatrix x,
     typename TTypes<T>::ConstMatrix cs_prev,
     typename TTypes<T>::ConstMatrix h_prev, typename TTypes<T>::ConstMatrix w,
@@ -477,11 +571,13 @@ void LSTMBlockCellBpropWithCUDA(
     typename TTypes<T>::Vec wco_grad, const int batch_size, const int cell_size,
     const bool use_peephole) {
   const auto& cu_stream = GetGpuStream(ctx);
-
+  // DOC:
+  // 定义二维模块和网格
   dim3 block_dim_2d(std::min(batch_size, 8), 32);
   dim3 grid_dim_2d(Eigen::divup(batch_size, static_cast<int>(block_dim_2d.x)),
                    Eigen::divup(cell_size, static_cast<int>(block_dim_2d.y)));
 
+  // 确定GPU内核成功启动
   TF_CHECK_OK(GpuLaunchKernel(
       lstm_gates_bprop<T, gate_layout>, grid_dim_2d, block_dim_2d, 0, cu_stream,
       cs_prev.data(), h_prev.data(), w.data(), wci.data(), wcf.data(),
@@ -490,6 +586,7 @@ void LSTMBlockCellBpropWithCUDA(
       dci.data(), df.data(), di.data(), dgates.data(), cs_prev_grad.data(),
       batch_size, cell_size, use_peephole));
 
+  // 如果使用偷窥孔连接，则计算算式如下（考虑上一阶段的cell值）
   if (use_peephole) {
     Eigen::array<Eigen::DenseIndex, 2> p_shape({1, cell_size});
     Eigen::array<Eigen::DenseIndex, 2> p_broadcast_shape({batch_size, 1});
@@ -507,11 +604,10 @@ void LSTMBlockCellBpropWithCUDA(
 // DOC:
 // 声明使用GPU时LSTM向前向后传播算法
 #define DECLARE_GPU_FBPROP(T, GATE_LAYOUT)                                    \
-  // 定义LSTM向前传播算法
+  // 定义LSTM向前传播算法块
   template <>                                                                 \
   void LSTMBlockCellFprop<GPUDevice, T, true /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                 \
-      // 定义所需的一系列变量
       OpKernelContext* ctx, const GPUDevice& d, const float forget_bias,      \
       const float cell_clip, bool use_peephole,                               \
       typename TTypes<T>::ConstMatrix x,                                      \
@@ -529,7 +625,7 @@ void LSTMBlockCellBpropWithCUDA(
         wci, wcf, wco, b, xh, i, cs, f, o, ci, co, gates, h, batch_size_,     \
         cell_size_, input_size_);                                             \
   }                                                                           \
-  // 定义LSTM反向传播算法
+  // 定义LSTM反向传播算法块
   template <>                                                                 \
   void LSTMBlockCellBprop<GPUDevice, T, true /* USE_CUBLAS */, GATE_LAYOUT>:: \
   operator()(                                                                 \

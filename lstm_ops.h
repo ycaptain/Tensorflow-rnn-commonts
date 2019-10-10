@@ -25,18 +25,35 @@ limitations under the License.
 namespace tensorflow {
 class OpKernelContext;
 
+// DOC:
+// 枚举类型: 门值结构
 enum GateLayout { ICFO, IFCO };
 
+// DOC:
+// 定义门值的偏差量常数
+//
+// 参数: 
+//      gate_layout ---- 门值结构
+//      cell_size ---- 记忆细胞容量
 constexpr int gate_c_offset(GateLayout gate_layout, int cell_size) {
+    // 如果门值结构不等于ICFO，则返回记忆细胞容量，否则门值结构采用两倍的记忆细胞容量
   return (gate_layout == ICFO) ? cell_size : cell_size * 2;
 }
 
+// DOC:
+// 定义遗忘门值的偏差量常数
+//
+// 参数:
+//      gate_layout ---- 门值结构
+//      cell_size ---- 记忆细胞容量
 constexpr int gate_f_offset(GateLayout gate_layout, int cell_size) {
   return (gate_layout == ICFO) ? cell_size * 2 : cell_size;
 }
 
 namespace functor {
 
+// DOC:
+// 初始化张量中参数为0
 template <typename Device, typename T>
 struct TensorZero {
   void operator()(const Device& d, typename TTypes<T>::Flat t) {
@@ -44,6 +61,8 @@ struct TensorZero {
   }
 };
 
+// DOC:
+// 随机初始化张量中参数
 template <typename Device, typename T>
 struct TensorUnalignedZero {
   void operator()(const Device& d, typename TTypes<T>::UnalignedFlat t) {
@@ -51,6 +70,8 @@ struct TensorUnalignedZero {
   }
 };
 
+// DOC:
+// 复制张量
 template <typename Device, typename T>
 struct TensorCopy {
   void operator()(const Device& d, typename TTypes<T>::ConstFlat src,
@@ -59,6 +80,8 @@ struct TensorCopy {
   }
 };
 
+// DOC:
+// 随机复制张量中值
 template <typename Device, typename T>
 struct TensorCopyUnaligned {
   void operator()(const Device& d, typename TTypes<T>::UnalignedConstFlat src,
@@ -67,6 +90,8 @@ struct TensorCopyUnaligned {
   }
 };
 
+// DOC:
+// 复制无序的张量并回到原始序列状态
 template <typename Device, typename T>
 struct TensorCopyToUnaligned {
   void operator()(const Device& d, typename TTypes<T>::ConstFlat src,
@@ -75,6 +100,8 @@ struct TensorCopyToUnaligned {
   }
 };
 
+// DOC:
+// 增加张量
 template <typename Device, typename T>
 struct TensorAdd {
   void operator()(const Device& d, typename TTypes<T>::ConstFlat a,
@@ -83,6 +110,8 @@ struct TensorAdd {
   }
 };
 
+// DOC:
+// 将张量边缘的部分填补0
 template <typename Device, typename T>
 struct TensorZeroPadding {
   void operator()(const Device& d, const int64 time_idx,
@@ -101,6 +130,8 @@ struct TensorZeroPadding {
   }
 };
 
+// DOC:
+// LSTM记忆细胞块
 struct LSTMBlockCell {
   LSTMBlockCell(const int batch_size, const int input_size, const int cell_size)
       : batch_size_(batch_size),
@@ -157,6 +188,8 @@ struct LSTMBlockCell {
   const int cell_size_;
 };
 
+// DOC:
+// GPU处理器的实现
 // See lstm_ops.cc for CPUDevice implementation and lstm_ops_gpu.cu.cc for
 // GPUDevice implementation.
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
@@ -209,6 +242,8 @@ struct LSTMBlockCellBprop : public LSTMBlockCell {
       typename TTypes<T>::Vec wcf_grad, typename TTypes<T>::Vec wco_grad);
 };
 
+// DOC:
+// LSTM反向传播算法模块
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 struct BlockLSTMBprop : public LSTMBlockCell {
   BlockLSTMBprop(const int batch_size, const int input_size,
