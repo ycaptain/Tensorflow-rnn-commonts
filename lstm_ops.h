@@ -306,7 +306,36 @@ struct LSTMBlockCellBprop : public LSTMBlockCell {
 // LSTM反向传播算法模块
 //
 // 成员变量：
-
+//      ctx ---- 输入内容
+//      d --- CPU处理器
+//      use_peephole    ---- 是否使用偷窥孔连接
+//      x   ---- 输入值
+//      cs_prev ---- 前一个记忆细胞的值
+//      h_prev  ---- 前一个假设值
+//      w   ---- 权重矩阵
+//      wci ---- 更新门的权重矩阵
+//      wcf ---- 遗忘门的权重矩阵
+//      wco ---- 输出门的权重矩阵
+//      b   ---- 偏差值
+//      i   ---- 更新门值
+//      cs  ---- 候选记忆细胞值
+//      f   ---- 遗忘门值
+//      o   ---- 输出门值
+//      ci  ---- 更新记忆细胞值
+//      co  ---- 输出记忆细胞值
+//      cs_grad ---- 记忆细胞值的梯度
+//      h_grad  ----  假设值的梯度
+//      do_ ---- 输出值的偏导值
+//      dcs ---- 候选记忆细胞值的偏导值
+//      dci ---- 更新记忆细胞偏导值
+//      df ---- 遗忘门偏导值
+//      di ----  更新门偏导值
+//      dgates  ----  门值偏导值
+//      cs_prev_grad    ---- 前一个记忆细胞值的梯度
+//      wci_grad    ---- 更新门权重矩阵的梯度
+//      wcf_grad    ---- 遗忘门权重矩阵的梯度
+//      wco_grad    ---- 输出门权重矩阵的梯度
+//      b_grad ---- 偏差值的梯度
 template <typename Device, typename T, bool USE_CUBLAS, GateLayout gate_layout>
 struct BlockLSTMBprop : public LSTMBlockCell {
   BlockLSTMBprop(const int batch_size, const int input_size,
